@@ -353,6 +353,7 @@ type editOptions struct {
 	unsetComment    bool
 	unsetSource     bool
 	replaceTrackers bool
+	clearTrackers   bool
 	noAutoAnnounce  bool
 	ignoreMissing   bool
 }
@@ -415,278 +416,36 @@ func cmdEdit(args []string) error {
 	if err != nil {
 		return err
 	}
-	oldAnalysis, err := analyzeTorrent(doc.Top, doc.RawInfo)
+	res, err := applyEdit(doc, &o)
 	if err != nil {
 		return err
 	}
-	oldV1, oldV2 := oldAnalysis.infoHashes(doc.RawInfo)
-
-	infoElems := func(elems []pathElem) bool {
-		return len(elems) > 0 && !elems[0].isIndex && elems[0].key == "info"
+	if o.verbose {
+		for _, op := range res.Operations {
+			fmt.Fprintln(os.Stderr, op)
+		}
 	}
-	apply := func(desc string, elems []pathElem, fn func() (bool, error)) error {
-		changed, err := fn()
-		if err != nil {
-			return fmt.Errorf("%s: %w", desc, err)
-		}
-		if changed && infoElems(elems) {
-			doc.InfoDirty = true
-		}
-		if changed && o.verbose {
-			fmt.Fprintf(os.Stderr, "%s\n", desc)
-		}
-		return nil
-	}
-
-	didOp := false
-	for _, item := range o.sets {
-		pathStr, valStr, err := splitKV(item)
-		if err != nil {
-			return fmt.Errorf("--set %q: %w", item, err)
-		}
-		elems, err := parsePath(pathStr)
-		if err != nil {
-			return err
-		}
-		val, err := parseAutoValue(valStr)
-		if err != nil {
-			return fmt.Errorf("--set %s: %w", pathStr, err)
-		}
-		if err := apply("set "+pathStr, elems, func() (bool, error) { return setPath(doc.Top, elems, val) }); err != nil {
-			return err
-		}
-		didOp = true
-	}
-	for _, item := range o.setInts {
-		pathStr, valStr, err := splitKV(item)
-		if err != nil {
-			return fmt.Errorf("--set-int %q: %w", item, err)
-		}
-		elems, err := parsePath(pathStr)
-		if err != nil {
-			return err
-		}
-		n, err := strconv.ParseInt(valStr, 10, 64)
-		if err != nil {
-			return fmt.Errorf("--set-int %s: %w", pathStr, err)
-		}
-		val := newInt(n)
-		if err := apply("set-int "+pathStr, elems, func() (bool, error) { return setPath(doc.Top, elems, val) }); err != nil {
-			return err
-		}
-		didOp = true
-	}
-	for _, item := range o.setJSONs {
-		pathStr, valStr, err := splitKV(item)
-		if err != nil {
-			return fmt.Errorf("--set-json %q: %w", item, err)
-		}
-		elems, err := parsePath(pathStr)
-		if err != nil {
-			return err
-		}
-		val, err := parseJSONValue([]byte(valStr))
-		if err != nil {
-			return fmt.Errorf("--set-json %s: %w", pathStr, err)
-		}
-		if err := apply("set-json "+pathStr, elems, func() (bool, error) { return setPath(doc.Top, elems, val) }); err != nil {
-			return err
-		}
-		didOp = true
-	}
-	for _, item := range o.setBencodes {
-		pathStr, valStr, err := splitKV(item)
-		if err != nil {
-			return fmt.Errorf("--set-bencode %q: %w", item, err)
-		}
-		elems, err := parsePath(pathStr)
-		if err != nil {
-			return err
-		}
-		val, err := parseBencode([]byte(valStr))
-		if err != nil {
-			return fmt.Errorf("--set-bencode %s: %w", pathStr, err)
-		}
-		if err := apply("set-bencode "+pathStr, elems, func() (bool, error) { return setPath(doc.Top, elems, val) }); err != nil {
-			return err
-		}
-		didOp = true
-	}
-	for _, pathStr := range o.unsets {
-		elems, err := parsePath(pathStr)
-		if err != nil {
-			return err
-		}
-		if err := apply("unset "+pathStr, elems, func() (bool, error) {
-			changed, err := unsetPath(doc.Top, elems)
-			if err != nil {
-				return false, err
-			}
-			if !changed && !o.ignoreMissing {
-				return false, errors.New("path not found")
-			}
-			return changed, nil
-		}); err != nil {
-			return err
-		}
-		didOp = true
-	}
-	for _, item := range o.appends {
-		pathStr, valStr, err := splitKV(item)
-		if err != nil {
-			return fmt.Errorf("--append %q: %w", item, err)
-		}
-		elems, err := parsePath(pathStr)
-		if err != nil {
-			return err
-		}
-		val, err := parseAutoValue(valStr)
-		if err != nil {
-			return fmt.Errorf("--append %s: %w", pathStr, err)
-		}
-		if err := apply("append "+pathStr, elems, func() (bool, error) { return appendPath(doc.Top, elems, val) }); err != nil {
-			return err
-		}
-		didOp = true
-	}
-
-	if len(o.trackers) > 0 || len(o.removeTrackers) > 0 {
-		tiers := cloneTiers(parseTrackers(doc.Top).Tiers)
-		added := []string(o.trackers)
-		if o.replaceTrackers && len(added) > 0 {
-			tiers = nil
-		}
-		for _, u := range added {
-			tiers = append(tiers, []string{u})
-		}
-		for _, remove := range o.removeTrackers {
-			tiers = removeTrackerURL(tiers, remove)
-		}
-		if len(tiers) == 0 {
-			doc.Top.d.del("announce-list")
-		} else {
-			doc.Top.d.setString("announce-list", tiersValue(tiers))
-		}
-		// If announce itself was removed, replace it with the first remaining tracker.
-		if av := doc.Top.d.get("announce"); av != nil && av.kind == kindBytes {
-			announceValue := string(av.b)
-			for _, remove := range o.removeTrackers {
-				if announceValue == remove {
-					if first := firstTracker(tiers); first != "" {
-						doc.Top.d.setString("announce", newString(first))
-					} else {
-						doc.Top.d.del("announce")
-					}
-					break
-				}
-			}
-		}
-		if !o.noAutoAnnounce && len(added) > 0 && doc.Top.d.get("announce") == nil {
-			doc.Top.d.setString("announce", newString(added[0]))
-		}
-		didOp = true
-	}
-	if o.announce.set {
-		if doc.Top.d.get("announce") == nil || string(valueBytes(doc.Top.d.get("announce"))) != o.announce.value {
-			doc.Top.d.setString("announce", newString(o.announce.value))
-		}
-		didOp = true
-	}
-	if o.unsetAnnounce {
-		doc.Top.d.del("announce")
-		didOp = true
-	}
-	if o.comment.set {
-		doc.Top.d.setString("comment", newString(o.comment.value))
-		didOp = true
-	}
-	if o.unsetComment {
-		doc.Top.d.del("comment")
-		didOp = true
-	}
-	if o.source.set {
-		info := doc.Top.d.get("info")
-		if info == nil || info.kind != kindDict {
-			return errors.New("info dictionary is missing")
-		}
-		if string(valueBytes(info.d.get("source"))) != o.source.value {
-			info.d.setString("source", newString(o.source.value))
-			doc.InfoDirty = true
-		}
-		didOp = true
-	}
-	if o.unsetSource {
-		info := doc.Top.d.get("info")
-		if info != nil && info.kind == kindDict {
-			if info.d.del("source") {
-				doc.InfoDirty = true
-			}
-		}
-		didOp = true
-	}
-	if o.private {
-		info := doc.Top.d.get("info")
-		if info == nil || info.kind != kindDict {
-			return errors.New("info dictionary is missing")
-		}
-		if pv := info.d.get("private"); pv == nil || pv.kind != kindInt || pv.i != 1 {
-			info.d.setString("private", newInt(1))
-			doc.InfoDirty = true
-		}
-		didOp = true
-	}
-	if o.public {
-		info := doc.Top.d.get("info")
-		if info != nil && info.kind == kindDict && info.d.del("private") {
-			doc.InfoDirty = true
-		}
-		didOp = true
-	}
-
-	if !didOp {
-		return errors.New("edit: no operations specified")
-	}
-
-	info := doc.Top.d.get("info")
-	if info == nil || info.kind != kindDict {
-		return errors.New("edit: the torrent must contain an info dictionary")
-	}
-	doc.Info = info
-	encoded, err := doc.encoded()
-	if err != nil {
-		return err
-	}
-	analysisBytes := doc.RawInfo
-	if doc.InfoDirty {
-		analysisBytes = encodeBencode(doc.Info)
-	}
-	newAnalysis, analyzeErr := analyzeTorrent(doc.Top, analysisBytes)
-	if analyzeErr != nil {
-		return analyzeErr
-	}
-	newV1, newV2 := newAnalysis.infoHashes(analysisBytes)
-
 	if !o.quiet {
-		if oldV1 != "" {
-			fmt.Fprintf(os.Stderr, "info hash v1: %s", oldV1)
-			if newV1 != oldV1 {
-				fmt.Fprintf(os.Stderr, " -> %s (changed)", newV1)
+		if res.OldV1 != "" {
+			fmt.Fprintf(os.Stderr, "info hash v1: %s", res.OldV1)
+			if res.NewV1 != res.OldV1 {
+				fmt.Fprintf(os.Stderr, " -> %s (changed)", res.NewV1)
 			} else {
 				fmt.Fprintf(os.Stderr, " (unchanged)")
 			}
 			fmt.Fprintln(os.Stderr)
 		}
-		if oldV2 != "" {
-			fmt.Fprintf(os.Stderr, "info hash v2: %s", oldV2)
-			if newV2 != oldV2 {
-				fmt.Fprintf(os.Stderr, " -> %s (changed)", newV2)
+		if res.OldV2 != "" {
+			fmt.Fprintf(os.Stderr, "info hash v2: %s", res.OldV2)
+			if res.NewV2 != res.OldV2 {
+				fmt.Fprintf(os.Stderr, " -> %s (changed)", res.NewV2)
 			} else {
 				fmt.Fprintf(os.Stderr, " (unchanged)")
 			}
 			fmt.Fprintln(os.Stderr)
 		}
-		if o.verbose && len(newAnalysis.Warnings) > 0 {
-			for _, warning := range newAnalysis.Warnings {
+		if o.verbose {
+			for _, warning := range res.Warnings {
 				fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
 			}
 		}
@@ -701,7 +460,7 @@ func cmdEdit(args []string) error {
 	if o.output == "" && !o.inPlace && isTerminal(os.Stdout) {
 		return errors.New("edit: use --output FILE, --in-place, or redirect stdout")
 	}
-	written, err := writeOutput(encoded, paths[0], o.output, o.inPlace, doc.Mode)
+	written, err := writeOutput(res.Encoded, paths[0], o.output, o.inPlace, doc.Mode)
 	if err != nil {
 		return err
 	}

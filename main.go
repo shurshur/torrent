@@ -3,7 +3,8 @@
 // It supports v1, v2 and hybrid v1+v2 torrents, emits machine-readable JSON,
 // edits arbitrary (including nested and non-standard) keys while preserving
 // the raw info dictionary, creates torrents, verifies data, repairs missing v2
-// piece layers and creates BEP 47 padding files.
+// piece layers, creates BEP 47 padding files and serves a local web UI for
+// metadata inspection and editing.
 package main
 
 import (
@@ -76,6 +77,8 @@ func run(args []string) int {
 		err = cmdExport(rest)
 	case "import", "from-json":
 		err = cmdImport(rest)
+	case "web":
+		err = cmdWeb(rest)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n\n", cmd)
 		printUsage(os.Stderr)
@@ -99,7 +102,7 @@ func run(args []string) int {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, `%s %s - inspect, edit, create and verify BitTorrent metainfo files
+	fmt.Fprintf(w, `%s %s - inspect, edit, create, verify and repair BitTorrent metainfo files
 
 Usage:
   %s <command> [options] [arguments]
@@ -113,6 +116,7 @@ Commands:
   pad FILE           Create BEP 47 padding files (zero-filled)
   export FILE        Export a torrent as editable JSON
   import FILE.json   Build a torrent from exported/edited JSON
+  web                Start the local web UI for info/edit
   version            Print the version
   help [command]     Show help
 
@@ -126,6 +130,7 @@ Examples:
   %s verify --data /downloads out.torrent
   %s repair --data /downloads saved.torrent
   %s pad --dir /downloads out.torrent
+  %s web --no-browser
 
 Key paths:
   Dot-separated paths address nested dictionaries; [N] addresses lists.
@@ -146,5 +151,5 @@ JSON output notes:
   Binary bencode strings are represented as {"$base64":"..."}.
   The export/import commands keep the original raw info bytes so that
   editing anything outside info does not change the info hash.
-`, programName, version, programName, programName, programName, programName, programName, programName, programName, programName, programName, programName)
+`, programName, version, programName, programName, programName, programName, programName, programName, programName, programName, programName, programName, programName)
 }

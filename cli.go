@@ -22,40 +22,47 @@ type torrentDoc struct {
 	InfoDirty bool
 }
 
+func parseTorrentDoc(data []byte) (*torrentDoc, error) {
+	top, err := parseBencode(data)
+	if err != nil {
+		return nil, err
+	}
+	if top.kind != kindDict {
+		return nil, errors.New("metainfo is not a dictionary")
+	}
+	info := top.d.get("info")
+	if info == nil || info.kind != kindDict {
+		return nil, errors.New("metainfo has no info dictionary")
+	}
+	rawInfo, err := findRawInfo(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(rawInfo) == 0 {
+		rawInfo = encodeBencode(info)
+	}
+	return &torrentDoc{
+		Mode:    0644,
+		Top:     top,
+		Info:    info,
+		RawInfo: rawInfo,
+	}, nil
+}
+
 func loadTorrentDoc(path string) (*torrentDoc, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	top, err := parseBencode(data)
+	doc, err := parseTorrentDoc(data)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if top.kind != kindDict {
-		return nil, fmt.Errorf("%s: metainfo is not a dictionary", path)
-	}
-	info := top.d.get("info")
-	if info == nil || info.kind != kindDict {
-		return nil, fmt.Errorf("%s: metainfo has no info dictionary", path)
-	}
-	rawInfo, err := findRawInfo(data)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	if len(rawInfo) == 0 {
-		rawInfo = encodeBencode(info)
-	}
-	mode := os.FileMode(0644)
+	doc.Path = path
 	if st, err := os.Stat(path); err == nil {
-		mode = st.Mode().Perm()
+		doc.Mode = st.Mode().Perm()
 	}
-	return &torrentDoc{
-		Path:    path,
-		Mode:    mode,
-		Top:     top,
-		Info:    info,
-		RawInfo: rawInfo,
-	}, nil
+	return doc, nil
 }
 
 func (d *torrentDoc) encoded() ([]byte, error) {

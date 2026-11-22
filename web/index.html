@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>torrent web</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <h1>torrent <span class="muted">web</span></h1>
+    <div class="muted small" id="versionLine">локальный интерфейс</div>
+  </div>
+  <div id="connection" class="badge">подключение…</div>
+</header>
+
+<main>
+  <noscript>
+    <div class="panel message warn">Для web-интерфейса нужен JavaScript.</div>
+  </noscript>
+  <section id="uploadView" class="panel upload-panel">
+    <h2>Открыть торрент</h2>
+    <p class="muted">Файл обрабатывается локально на этом компьютере и не покидает его.</p>
+    <div id="dropZone" class="drop-zone" tabindex="0">
+      <strong>Перетащите .torrent сюда</strong>
+      <span class="muted">или нажмите, чтобы выбрать файл</span>
+      <input type="file" id="fileInput" accept=".torrent,application/x-bittorrent" hidden>
+    </div>
+    <div id="uploadMessage" class="message" hidden></div>
+  </section>
+
+  <section id="sessionView" hidden>
+    <div class="session-bar panel">
+      <div class="session-name">
+        <strong id="fileName"></strong>
+        <span id="dirtyBadge" class="badge" hidden>изменён</span>
+      </div>
+      <div class="actions">
+        <button type="button" id="newButton">Другой файл</button>
+        <button type="button" id="resetButton">Сбросить</button>
+        <button type="button" id="downloadButton" class="primary">Скачать .torrent</button>
+      </div>
+    </div>
+
+    <div id="message" class="message" hidden></div>
+
+    <nav class="tabs" aria-label="Разделы">
+      <button type="button" class="tab active" data-tab="info">Информация</button>
+      <button type="button" class="tab" data-tab="edit">Редактирование</button>
+    </nav>
+
+    <section id="infoTab" class="tab-panel">
+      <div id="summary" class="cards"></div>
+      <div class="grid two">
+        <div class="panel">
+          <h2>Трекеры</h2>
+          <div id="trackers" class="stack"></div>
+        </div>
+        <div class="panel">
+          <h2>Предупреждения</h2>
+          <div id="warnings" class="stack"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Файлы</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Путь</th><th class="num">Размер</th><th>Примечание</th></tr></thead>
+            <tbody id="filesBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <details class="panel">
+        <summary>Нестандартные ключи</summary>
+        <pre id="extrasView" class="code"></pre>
+      </details>
+      <details class="panel">
+        <summary>Полный JSON</summary>
+        <pre id="jsonView" class="code"></pre>
+      </details>
+    </section>
+
+    <section id="editTab" class="tab-panel" hidden>
+      <form id="commonForm" class="panel" autocomplete="off">
+        <h2>Основные поля</h2>
+        <div class="form-grid">
+          <label>announce
+            <input type="text" id="announceInput" spellcheck="false">
+          </label>
+          <label>comment
+            <input type="text" id="commentInput" spellcheck="false">
+          </label>
+          <label>info.source
+            <input type="text" id="sourceInput" spellcheck="false">
+          </label>
+          <label>info.private
+            <select id="privateSelect">
+              <option value="keep">не менять</option>
+              <option value="private">private = 1</option>
+              <option value="public">удалить private</option>
+            </select>
+          </label>
+        </div>
+        <label class="full">trackers
+          <textarea id="trackersInput" rows="4" spellcheck="false" placeholder="Один tier на строку; URL внутри tier — через запятую"></textarea>
+        </label>
+        <p class="hint">Изменение <code>info.source</code> или <code>info.private</code> меняет info hash.</p>
+        <div class="actions">
+          <button type="submit" class="primary">Применить изменения</button>
+        </div>
+      </form>
+
+      <div class="panel">
+        <h2>Произвольный ключ</h2>
+        <div class="form-grid">
+          <label>Путь
+            <input type="text" id="pathInput" spellcheck="false" placeholder="info.source или custom.nested.key">
+          </label>
+          <label>Тип
+            <select id="typeSelect">
+              <option value="string">string</option>
+              <option value="int">int</option>
+              <option value="json">json</option>
+              <option value="bencode">bencode</option>
+              <option value="base64">base64</option>
+              <option value="hex">hex</option>
+            </select>
+          </label>
+        </div>
+        <label class="full">Значение
+          <textarea id="valueInput" rows="3" spellcheck="false"></textarea>
+        </label>
+        <div class="actions">
+          <button type="button" id="setKeyButton">Set</button>
+          <button type="button" id="appendKeyButton">Append</button>
+          <button type="button" id="unsetKeyButton">Unset</button>
+        </div>
+        <p class="hint">
+          Пути: <code>announce</code>, <code>info.source</code>, <code>info.files[0].path[1]</code>,
+          ключи с точками — <code>["key.with.dots"]</code>.
+          Для изменения вложенных данных в <code>info</code> потребуется подтверждение.
+        </p>
+      </div>
+    </section>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
